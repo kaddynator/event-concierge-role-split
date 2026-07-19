@@ -14,6 +14,8 @@ import com.google.firebase.ai.type.liveGenerationConfig
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import java.text.DateFormat
 
 object CloudServices {
     private val auth by lazy { FirebaseAuth.getInstance() }
@@ -38,7 +40,7 @@ object CloudServices {
             }
         )
     }
-    private var stopVoice: (suspend () -> Unit)? = null
+    private var stopVoiceAction: (suspend () -> Unit)? = null
 
     fun connect(onResult: (Result<String>) -> Unit) {
         val ready: (String) -> Unit = { uid ->
@@ -69,11 +71,53 @@ object CloudServices {
             .collection(collection).document(id).delete()
     }
 
+    fun observeBroadcasts(
+        onUpdate: (List<Announcement>) -> Unit,
+        onError: (Exception) -> Unit
+    ): () -> Unit {
+        val listener = db.collection("events").document("aurora-gala")
+            .collection("broadcasts")
+            .orderBy("updatedAt", Query.Direction.DESCENDING)
+            .limit(20)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+                onUpdate(snapshot?.documents.orEmpty().map { document ->
+                    Announcement(
+                        id = document.id,
+                        title = document.getString("title").orEmpty(),
+                        content = document.getString("message").orEmpty(),
+                        time = document.getTimestamp("updatedAt")?.toDate()?.let {
+                            DateFormat.getTimeInstance(DateFormat.SHORT).format(it)
+                        }.orEmpty()
+                    )
+                })
+            }
+        return listener::remove
+    }
+
+    fun sendBroadcast(title: String, message: String, onResult: (Result<Unit>) -> Unit) {
+        val user = auth.currentUser
+            ?: return onResult(Result.failure(IllegalStateException("Cloud is not connected.")))
+        db.collection("events").document("aurora-gala")
+            .collection("broadcasts")
+            .add(
+                mapOf(
+                    "title" to title,
+                    "message" to message,
+                    "sentBy" to user.uid,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .addOnSuccessListener { onResult(Result.success(Unit)) }
+            .addOnFailureListener { onResult(Result.failure(it)) }
+    }
+
     @OptIn(PublicPreviewAPI::class)
     suspend fun toggleVoice(): Boolean {
-        stopVoice?.let {
-            it()
-            stopVoice = null
+        if (stopVoice()) {
             return false
         }
         check(
@@ -93,10 +137,17 @@ object CloudServices {
         )
         val session = model.connect()
         session.startAudioConversation()
-        stopVoice = {
+        stopVoiceAction = {
             session.stopAudioConversation()
             session.close()
         }
+        return true
+    }
+
+    suspend fun stopVoice(): Boolean {
+        val stop = stopVoiceAction ?: return false
+        stop()
+        stopVoiceAction = null
         return true
     }
 }

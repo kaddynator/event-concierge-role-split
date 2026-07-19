@@ -110,6 +110,9 @@ fun MainApp(viewModel: EventViewModel = viewModel()) {
     Scaffold(
         modifier = Modifier.fillMaxSize(),
         containerColor = MaterialTheme.colorScheme.background,
+        topBar = {
+            RoleTopBar(role = role, onSwitchRole = viewModel::requestRoleSwitch)
+        },
         bottomBar = {
             NavigationBar(
                 modifier = Modifier.windowInsetsPadding(WindowInsets.navigationBars),
@@ -161,6 +164,43 @@ fun MainApp(viewModel: EventViewModel = viewModel()) {
             }
             if (viewModel.showBriefingSheet) {
                 BriefingSheet(viewModel = viewModel, onDismiss = { viewModel.showBriefingSheet = false })
+            }
+        }
+    }
+}
+
+@Composable
+private fun RoleTopBar(role: AppRole, onSwitchRole: () -> Unit) {
+    Surface(color = MaterialTheme.colorScheme.background, tonalElevation = 1.dp) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .statusBarsPadding()
+                .heightIn(min = 64.dp)
+                .padding(horizontal = 18.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(Modifier.weight(1f)) {
+                Text(
+                    text = if (role == AppRole.ATTENDEE) "ATTENDEE MODE" else "ORGANIZER MODE",
+                    color = MaterialTheme.colorScheme.primary,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.2.sp
+                )
+                Text(
+                    text = if (role == AppRole.ATTENDEE) "Your event companion" else "Host operations",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontSize = 13.sp
+                )
+            }
+            TextButton(
+                onClick = onSwitchRole,
+                modifier = Modifier.testTag("switch_role_button")
+            ) {
+                Icon(Icons.Default.SwapHoriz, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Switch role", fontWeight = FontWeight.Bold)
             }
         }
     }
@@ -254,6 +294,7 @@ private fun RoleCard(
 fun HomeScreen(viewModel: EventViewModel) {
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val latestAnnouncement = viewModel.announcementsList.firstOrNull()
     val microphonePermission = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -349,13 +390,26 @@ fun HomeScreen(viewModel: EventViewModel) {
                             color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.8f),
                             letterSpacing = 1.sp
                         )
-                        val latestAnn = viewModel.announcementsList.firstOrNull()
                         Text(
-                            text = latestAnn?.content ?: "Enjoy your evening at the Aurora Foundation Gala!",
+                            text = latestAnnouncement?.title ?: "Welcome to the gala",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                        Text(
+                            text = latestAnnouncement?.content ?: "Enjoy your evening at the Aurora Foundation Gala!",
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSecondaryContainer
                         )
+                        if (!latestAnnouncement?.time.isNullOrBlank()) {
+                            Text(
+                                text = latestAnnouncement?.time.orEmpty(),
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                                modifier = Modifier.padding(top = 3.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -995,6 +1049,72 @@ fun OrganizerOverviewScreen(viewModel: EventViewModel) {
             Text("ORGANIZER", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
             Text("Tonight at a glance", fontSize = 30.sp, fontWeight = FontWeight.Black)
             Text("A calm operational summary—not another dashboard.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Campaign, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "BROADCAST TO ATTENDEES",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp
+                        )
+                    }
+                    Text(
+                        "Send a live Event Pulse update to every attendee using this event.",
+                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                    )
+                    OutlinedTextField(
+                        value = viewModel.broadcastTitle,
+                        onValueChange = { viewModel.broadcastTitle = it.take(60) },
+                        label = { Text("Short title") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = viewModel.broadcastMessage,
+                        onValueChange = { viewModel.broadcastMessage = it.take(280) },
+                        label = { Text("Message") },
+                        minLines = 3,
+                        maxLines = 5,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(
+                            "${viewModel.broadcastMessage.length}/280",
+                            color = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = 0.7f),
+                            fontSize = 12.sp
+                        )
+                        Button(
+                            onClick = viewModel::initiateBroadcast,
+                            enabled = !viewModel.broadcastSending &&
+                                viewModel.broadcastTitle.isNotBlank() &&
+                                viewModel.broadcastMessage.isNotBlank(),
+                            modifier = Modifier.testTag("send_broadcast_button")
+                        ) {
+                            Icon(Icons.AutoMirrored.Filled.Send, contentDescription = null)
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (viewModel.broadcastSending) "Sending…" else "Send broadcast")
+                        }
+                    }
+                }
+            }
         }
         item {
             PaperSummaryCard(
@@ -1892,6 +2012,8 @@ fun AlertDialogController(
                     is DialogState.ResolveIssueConfirmation -> "Resolve This Issue?"
                     is DialogState.ReportIssueConfirmation -> "Report New Issue?"
                     is DialogState.StaffHelpConfirmation -> "Alert Event Staff?"
+                    is DialogState.BroadcastConfirmation -> "Send this broadcast?"
+                    is DialogState.SwitchRoleConfirmation -> "Switch experience?"
                     is DialogState.MessageDialog -> state.title
                 },
                 fontWeight = FontWeight.Bold
@@ -1904,6 +2026,8 @@ fun AlertDialogController(
                     is DialogState.ResolveIssueConfirmation -> "Are you sure this issue has been resolved: \"${state.issue.description}\"?"
                     is DialogState.ReportIssueConfirmation -> "Are you sure you want to raise a ${state.priority} priority request for \"${state.description}\"?"
                     is DialogState.StaffHelpConfirmation -> "Would you like me to request help from the on-site event staff regarding your question: \"${state.query}\"?"
+                    is DialogState.BroadcastConfirmation -> "${state.title}\n\n${state.message}\n\nThis will appear in Event Pulse for all connected attendees."
+                    is DialogState.SwitchRoleConfirmation -> "Leave the current mode and return to attendee or organizer selection?"
                     is DialogState.MessageDialog -> state.message
                 },
                 fontSize = 15.sp,
@@ -1919,6 +2043,8 @@ fun AlertDialogController(
                         is DialogState.ResolveIssueConfirmation -> viewModel.confirmResolveIssue(state.issue)
                         is DialogState.ReportIssueConfirmation -> viewModel.confirmReportIssue(state.description, state.priority)
                         is DialogState.StaffHelpConfirmation -> viewModel.confirmStaffHelp(state.query)
+                        is DialogState.BroadcastConfirmation -> viewModel.confirmBroadcast(state.title, state.message)
+                        is DialogState.SwitchRoleConfirmation -> viewModel.confirmRoleSwitch()
                         is DialogState.MessageDialog -> viewModel.closeDialog()
                     }
                     if (state !is DialogState.MessageDialog) {
@@ -1932,7 +2058,15 @@ fun AlertDialogController(
                     }
                 )
             ) {
-                Text(if (state is DialogState.MessageDialog) "OK" else "Confirm", fontWeight = FontWeight.Bold)
+                Text(
+                    when (state) {
+                        is DialogState.MessageDialog -> "OK"
+                        is DialogState.BroadcastConfirmation -> "Send"
+                        is DialogState.SwitchRoleConfirmation -> "Switch role"
+                        else -> "Confirm"
+                    },
+                    fontWeight = FontWeight.Bold
+                )
             }
         },
         dismissButton = {

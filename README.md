@@ -153,7 +153,8 @@ Or build from the terminal:
 
 ## What is working
 
-- Separate attendee and organizer interfaces
+- Separate attendee and organizer interfaces with a visible, confirmed role switch
+- Organizer broadcasts delivered live to attendee Event Pulse through Firestore
 - Gemini-powered typed concierge answers
 - Gemini Live voice session with microphone input and audio output
 - Anonymous Firebase sessions
@@ -177,13 +178,15 @@ Before a public production launch:
 4. replace the App Check debug provider with Play Integrity;
 5. move organizer-managed event content fully into Firestore;
 6. use direct Google Workspace APIs only if background synchronization becomes
-   more valuable than the current user-confirmed handoffs.
+   more valuable than the current user-confirmed handoffs;
+7. add trusted-server FCM delivery if broadcasts must notify attendees while the
+   app is closed.
 
 ## The next lovely version
 
 - Let organizers create an event from a Google Calendar entry or event brief.
 - Generate an attendee-ready knowledge base from Drive documents.
-- Push urgent organizer updates to the concierge in real time.
+- Add optional background notifications for urgent organizer broadcasts.
 - Support multilingual voice conversations.
 - Add post-event summaries for attendance, common questions, and issue patterns.
 

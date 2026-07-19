@@ -1,6 +1,7 @@
 package com.example.viewmodel
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -14,6 +15,8 @@ sealed class DialogState {
     data class ResolveIssueConfirmation(val issue: OpenIssue) : DialogState()
     data class ReportIssueConfirmation(val description: String, val priority: String) : DialogState()
     data class StaffHelpConfirmation(val query: String) : DialogState()
+    data class BroadcastConfirmation(val title: String, val message: String) : DialogState()
+    data object SwitchRoleConfirmation : DialogState()
     data class MessageDialog(val title: String, val message: String) : DialogState()
 }
 
@@ -30,12 +33,35 @@ fun findSelfCheckInGuest(query: String, guests: List<Guest>): Guest? {
     }
 }
 
+fun validateBroadcast(title: String, message: String): String? = when {
+    title.isBlank() -> "Add a short title."
+    message.isBlank() -> "Add a message for attendees."
+    title.trim().length > 60 -> "Keep the title under 60 characters."
+    message.trim().length > 280 -> "Keep the message under 280 characters."
+    else -> null
+}
+
 class EventViewModel : ViewModel() {
     var cloudStatus by mutableStateOf("Connecting")
+    val announcementsList = mutableStateListOf<Announcement>().apply {
+        addAll(InMemoryStore.announcements)
+    }
+    private var stopBroadcastListener: (() -> Unit)? = null
 
     init {
         CloudServices.connect { result ->
             cloudStatus = if (result.isSuccess) "Cloud connected" else "Offline mode"
+            if (result.isSuccess) {
+                stopBroadcastListener = CloudServices.observeBroadcasts(
+                    onUpdate = { broadcasts ->
+                        if (broadcasts.isNotEmpty()) {
+                            announcementsList.clear()
+                            announcementsList.addAll(broadcasts)
+                        }
+                    },
+                    onError = { }
+                )
+            }
         }
     }
 
@@ -47,6 +73,21 @@ class EventViewModel : ViewModel() {
         currentTab = 0
         guestSearchQuery = ""
         recordRole(role)
+    }
+
+    fun requestRoleSwitch() {
+        activeDialog = DialogState.SwitchRoleConfirmation
+    }
+
+    fun confirmRoleSwitch() {
+        viewModelScope.launch {
+            runCatching { CloudServices.stopVoice() }
+            selectedRole = null
+            currentTab = 0
+            guestSearchQuery = ""
+            activeDialog = null
+            resetConcierge()
+        }
     }
     
     // Concierge Search State
@@ -73,7 +114,6 @@ class EventViewModel : ViewModel() {
     // Dynamic lists (from InMemoryStore)
     val guestsList = InMemoryStore.guests
     val issuesList = InMemoryStore.issues
-    val announcementsList = InMemoryStore.announcements
     val notesList = InMemoryStore.guestNotes
     val wavesList = InMemoryStore.guestWaves
     
@@ -83,6 +123,10 @@ class EventViewModel : ViewModel() {
     // Help Sheet inputs
     var reportDescription by mutableStateOf("")
     var reportPriority by mutableStateOf("Medium")
+
+    var broadcastTitle by mutableStateOf("")
+    var broadcastMessage by mutableStateOf("")
+    var broadcastSending by mutableStateOf(false)
 
     fun onConciergeQueryChanged(newQuery: String) {
         conciergeQuery = newQuery
@@ -175,6 +219,37 @@ class EventViewModel : ViewModel() {
     fun requestStaffHelpForUnknown() {
         val query = conciergeQuery
         activeDialog = DialogState.StaffHelpConfirmation(query)
+    }
+
+    fun initiateBroadcast() {
+        validateBroadcast(broadcastTitle, broadcastMessage)?.let {
+            activeDialog = DialogState.MessageDialog("Broadcast incomplete", it)
+            return
+        }
+        activeDialog = DialogState.BroadcastConfirmation(
+            broadcastTitle.trim(),
+            broadcastMessage.trim()
+        )
+    }
+
+    fun confirmBroadcast(title: String, message: String) {
+        broadcastSending = true
+        CloudServices.sendBroadcast(title, message) { result ->
+            broadcastSending = false
+            if (result.isSuccess) {
+                broadcastTitle = ""
+                broadcastMessage = ""
+                activeDialog = DialogState.MessageDialog(
+                    "Broadcast sent",
+                    "Attendees will see this message in Event Pulse."
+                )
+            } else {
+                activeDialog = DialogState.MessageDialog(
+                    "Broadcast failed",
+                    result.exceptionOrNull()?.message ?: "Check the connection and try again."
+                )
+            }
+        }
     }
 
     fun confirmStaffHelp(query: String) {
@@ -296,5 +371,10 @@ class EventViewModel : ViewModel() {
     
     fun dismissWaveFeedback() {
         waveConfirmationMessage = null
+    }
+
+    override fun onCleared() {
+        stopBroadcastListener?.invoke()
+        super.onCleared()
     }
 }
