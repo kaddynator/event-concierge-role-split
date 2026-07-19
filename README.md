@@ -13,6 +13,13 @@
 > [Stanford x DeepMind Hackathon: Build with Google Gemini](https://luma.com/e51fygtm),
 > presented by GDG Stanford and hosted with Google DeepMind.
 
+## Watch the demo
+
+| Full product demo | One-minute Short |
+| --- | --- |
+| [![Watch the Event Concierge product demo](https://img.youtube.com/vi/O7tzNWv-QZw/hqdefault.jpg)](https://youtu.be/O7tzNWv-QZw) | [![Watch the Event Concierge YouTube Short](https://img.youtube.com/vi/jw46EdWIypQ/hqdefault.jpg)](https://youtube.com/shorts/jw46EdWIypQ) |
+| [Watch the full demo on YouTube](https://youtu.be/O7tzNWv-QZw) | [Watch the Short on YouTube](https://youtube.com/shorts/jw46EdWIypQ) |
+
 Event Concierge gives everyone at an event the right kind of help without
 turning the evening into another dashboard. Attendees get a warm, private
 concierge. Organizers get a focused operational view. Gemini makes the
