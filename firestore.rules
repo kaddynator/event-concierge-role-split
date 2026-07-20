@@ -22,9 +22,50 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    match /events/aurora-gala/automatedCalls/{callId} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.keys().hasOnly([
+          'guestId',
+          'guestName',
+          'templateId',
+          'title',
+          'question',
+          'options',
+          'status',
+          'answer',
+          'createdBy',
+          'createdAt',
+          'updatedAt'
+        ])
+        && request.resource.data.guestId is string
+        && request.resource.data.guestName is string
+        && request.resource.data.templateId in ['food', 'rsvp', 'arrival']
+        && request.resource.data.title is string
+        && request.resource.data.question is string
+        && request.resource.data.question.size() <= 200
+        && request.resource.data.options is list
+        && request.resource.data.options.size() > 0
+        && request.resource.data.options.size() <= 6
+        && request.resource.data.status == 'pending'
+        && request.resource.data.answer == ''
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+      allow update: if request.auth != null
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'answer', 'updatedAt'])
+        && request.resource.data.status in ['active', 'completed', 'declined']
+        && request.resource.data.answer is string
+        && request.resource.data.answer.size() <= 100
+        && request.resource.data.updatedAt == request.time;
+      allow delete: if false;
+    }
+
     match /events/aurora-gala/{collection}/{document} {
       allow read, write: if request.auth != null
-        && collection != 'broadcasts';
+        && collection != 'broadcasts'
+        && collection != 'automatedCalls';
     }
   }
 }

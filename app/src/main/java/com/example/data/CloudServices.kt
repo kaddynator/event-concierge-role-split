@@ -115,11 +115,114 @@ object CloudServices {
             .addOnFailureListener { onResult(Result.failure(it)) }
     }
 
+    fun observeAutomatedCalls(
+        onUpdate: (List<AutomatedCall>) -> Unit,
+        onError: (Exception) -> Unit
+    ): () -> Unit {
+        val listener = db.collection("events").document("aurora-gala")
+            .collection("automatedCalls")
+            .orderBy("createdAt", Query.Direction.DESCENDING)
+            .limit(50)
+            .addSnapshotListener { snapshot, error ->
+                if (error != null) {
+                    onError(error)
+                    return@addSnapshotListener
+                }
+                onUpdate(snapshot?.documents.orEmpty().map { document ->
+                    AutomatedCall(
+                        id = document.id,
+                        guestId = document.getString("guestId").orEmpty(),
+                        guestName = document.getString("guestName").orEmpty(),
+                        templateId = document.getString("templateId").orEmpty(),
+                        title = document.getString("title").orEmpty(),
+                        question = document.getString("question").orEmpty(),
+                        options = (document.get("options") as? List<*>)
+                            .orEmpty()
+                            .filterIsInstance<String>(),
+                        status = document.getString("status").orEmpty(),
+                        answer = document.getString("answer").orEmpty(),
+                        time = document.getTimestamp("createdAt")?.toDate()?.let {
+                            DateFormat.getTimeInstance(DateFormat.SHORT).format(it)
+                        }.orEmpty()
+                    )
+                })
+            }
+        return listener::remove
+    }
+
+    fun createAutomatedCall(
+        guest: Guest,
+        template: CallTemplate,
+        onResult: (Result<Unit>) -> Unit
+    ) {
+        val user = auth.currentUser
+            ?: return onResult(Result.failure(IllegalStateException("Cloud is not connected.")))
+        db.collection("events").document("aurora-gala")
+            .collection("automatedCalls")
+            .add(
+                mapOf(
+                    "guestId" to guest.id,
+                    "guestName" to guest.name,
+                    "templateId" to template.id,
+                    "title" to template.title,
+                    "question" to template.question,
+                    "options" to template.options,
+                    "status" to "pending",
+                    "answer" to "",
+                    "createdBy" to user.uid,
+                    "createdAt" to FieldValue.serverTimestamp(),
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .addOnSuccessListener { onResult(Result.success(Unit)) }
+            .addOnFailureListener { onResult(Result.failure(it)) }
+    }
+
+    fun updateAutomatedCall(
+        id: String,
+        status: String,
+        answer: String = "",
+        onResult: (Result<Unit>) -> Unit = {}
+    ) {
+        db.collection("events").document("aurora-gala")
+            .collection("automatedCalls").document(id)
+            .update(
+                mapOf(
+                    "status" to status,
+                    "answer" to answer,
+                    "updatedAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .addOnSuccessListener { onResult(Result.success(Unit)) }
+            .addOnFailureListener { onResult(Result.failure(it)) }
+    }
+
     @OptIn(PublicPreviewAPI::class)
     suspend fun toggleVoice(): Boolean {
         if (stopVoice()) {
             return false
         }
+        return openVoiceSession(
+            "You are the Aurora Foundation Gala concierge. Be warm, brief, and never invent guest information."
+        )
+    }
+
+    @OptIn(PublicPreviewAPI::class)
+    suspend fun startGuidedVoice(question: String): Boolean {
+        stopVoice()
+        return openVoiceSession(
+            """
+            You are making a short, consented in-app call for the Aurora Foundation Gala.
+            Introduce yourself as the AI concierge, ask exactly this question: $question
+            Briefly acknowledge the attendee's answer. Do not ask for sensitive information.
+            The attendee will confirm their structured answer using the buttons on screen.
+            """.trimIndent(),
+            "Begin the call now."
+        )
+    }
+
+    @OptIn(PublicPreviewAPI::class)
+    private suspend fun openVoiceSession(systemInstruction: String, opening: String? = null): Boolean {
         check(
             ContextCompat.checkSelfPermission(
                 FirebaseApp.getInstance().applicationContext,
@@ -132,7 +235,7 @@ object CloudServices {
                 responseModality = ResponseModality.AUDIO
             },
             systemInstruction = content {
-                text("You are the Aurora Foundation Gala concierge. Be warm, brief, and never invent guest information.")
+                text(systemInstruction)
             }
         )
         val session = model.connect()
@@ -141,13 +244,14 @@ object CloudServices {
             session.stopAudioConversation()
             session.close()
         }
+        opening?.let { session.send(it) }
         return true
     }
 
     suspend fun stopVoice(): Boolean {
         val stop = stopVoiceAction ?: return false
-        stop()
         stopVoiceAction = null
+        stop()
         return true
     }
 }

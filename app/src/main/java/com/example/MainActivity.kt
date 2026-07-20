@@ -94,6 +94,10 @@ fun MainApp(viewModel: EventViewModel = viewModel()) {
         RoleGate(onRoleSelected = viewModel::selectRole)
         return
     }
+    if (role == AppRole.ATTENDEE && viewModel.activeAutomatedCall != null) {
+        AutomatedCallScreen(viewModel)
+        return
+    }
 
     val attendeeItems = listOf(
         Triple("Concierge", Icons.Default.AutoAwesome, 0),
@@ -165,8 +169,173 @@ fun MainApp(viewModel: EventViewModel = viewModel()) {
             if (viewModel.showBriefingSheet) {
                 BriefingSheet(viewModel = viewModel, onDismiss = { viewModel.showBriefingSheet = false })
             }
+            if (role == AppRole.ATTENDEE) {
+                viewModel.incomingAutomatedCall?.let {
+                    IncomingAutomatedCallDialog(
+                        call = it,
+                        onAnswer = { viewModel.answerAutomatedCall(it) },
+                        onDecline = { viewModel.declineAutomatedCall(it) }
+                    )
+                }
+            }
         }
     }
+}
+
+@Composable
+private fun IncomingAutomatedCallDialog(
+    call: AutomatedCall,
+    onAnswer: () -> Unit,
+    onDecline: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = {},
+        icon = { Icon(Icons.Default.SupportAgent, contentDescription = null) },
+        title = { Text("Aurora concierge is calling", fontWeight = FontWeight.Bold) },
+        text = {
+            Column {
+                Text(call.title, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                Text(
+                    "AI-assisted in-app call for ${call.guestName}. You can decline or answer without sharing sensitive information.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(top = 8.dp)
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = onAnswer, modifier = Modifier.testTag("answer_call_button")) {
+                Icon(Icons.Default.Call, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Answer")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDecline, modifier = Modifier.testTag("decline_call_button")) {
+                Icon(Icons.Default.CallEnd, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("Decline")
+            }
+        },
+        containerColor = MaterialTheme.colorScheme.surface,
+        shape = RoundedCornerShape(24.dp)
+    )
+}
+
+@Composable
+private fun AutomatedCallScreen(viewModel: EventViewModel) {
+    val call = viewModel.activeAutomatedCall ?: return
+    val context = LocalContext.current
+    val microphonePermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) viewModel.startGuidedCallVoice()
+    }
+
+    LaunchedEffect(call.id) {
+        if (
+            ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            viewModel.startGuidedCallVoice()
+        } else {
+            microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+    DisposableEffect(call.id) {
+        onDispose(viewModel::stopGuidedCallVoice)
+    }
+
+    Surface(
+        color = MaterialTheme.colorScheme.background,
+        modifier = Modifier.fillMaxSize()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text(
+                "AURORA AI CONCIERGE",
+                color = MaterialTheme.colorScheme.primary,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.4.sp
+            )
+            Spacer(Modifier.height(42.dp))
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                shape = CircleShape,
+                modifier = Modifier.size(116.dp)
+            ) {
+                Icon(
+                    Icons.Default.SupportAgent,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.padding(28.dp)
+                )
+            }
+            Text(
+                call.title,
+                fontSize = 28.sp,
+                fontWeight = FontWeight.Black,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 24.dp)
+            )
+            Text(
+                when (viewModel.guidedCallVoiceState) {
+                    "connecting" -> "Connecting Gemini voice…"
+                    "listening" -> "Gemini is listening"
+                    "saving" -> "Saving your response…"
+                    "unavailable" -> "Voice unavailable—choose an answer below"
+                    else -> "Choose an answer below"
+                },
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.padding(top = 8.dp)
+            )
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                shape = RoundedCornerShape(22.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 28.dp)
+            ) {
+                Text(
+                    call.question,
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(22.dp)
+                )
+            }
+            Column(
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 18.dp)
+            ) {
+                call.options.forEach { answer ->
+                    Button(
+                        onClick = { viewModel.submitAutomatedCallAnswer(answer) },
+                        enabled = viewModel.guidedCallVoiceState != "saving",
+                        shape = RoundedCornerShape(16.dp),
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
+                    ) {
+                        Text(answer, fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+            TextButton(
+                onClick = viewModel::endAutomatedCall,
+                modifier = Modifier.padding(top = 16.dp)
+            ) {
+                Icon(Icons.Default.CallEnd, contentDescription = null)
+                Spacer(Modifier.width(6.dp))
+                Text("End call")
+            }
+        }
+    }
+    viewModel.activeDialog?.let { AlertDialogController(it, viewModel) }
 }
 
 @Composable
@@ -1033,12 +1202,14 @@ fun AttendeeCheckInScreen(viewModel: EventViewModel) {
 @Composable
 fun OrganizerOverviewScreen(viewModel: EventViewModel) {
     val context = LocalContext.current
+    var guestMenuExpanded by remember { mutableStateOf(false) }
     val checkedIn = viewModel.guestsList.count { it.isCheckedIn }
     val attending = viewModel.guestsList.count { it.rsvpStatus == "Attending" }
     val vipPresent = viewModel.guestsList.count { it.isVip && it.isCheckedIn }
     val vipTotal = viewModel.guestsList.count { it.isVip }
     val openIssues = viewModel.issuesList.count { !it.isResolved }
     val next = InMemoryStore.schedule.firstOrNull { it.isNext }
+    val selectedCallGuest = viewModel.guestsList.first { it.id == viewModel.selectedCallGuestId }
 
     LazyColumn(
         modifier = Modifier.fillMaxSize().padding(horizontal = 18.dp),
@@ -1049,6 +1220,111 @@ fun OrganizerOverviewScreen(viewModel: EventViewModel) {
             Text("ORGANIZER", color = MaterialTheme.colorScheme.primary, fontSize = 11.sp, fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp)
             Text("Tonight at a glance", fontSize = 30.sp, fontWeight = FontWeight.Black)
             Text("A calm operational summary—not another dashboard.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
+        item {
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                shape = RoundedCornerShape(24.dp),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(Modifier.padding(18.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.PhoneInTalk, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "AUTOMATED CONCIERGE CALL",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            letterSpacing = 1.1.sp
+                        )
+                    }
+                    Text(
+                        "Ask one attendee a short question through an AI-assisted in-app call.",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        fontSize = 14.sp,
+                        modifier = Modifier.padding(top = 8.dp, bottom = 12.dp)
+                    )
+                    InMemoryStore.callTemplates.forEach { template ->
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(14.dp))
+                                .clickable { viewModel.selectedCallTemplateId = template.id }
+                                .padding(vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = viewModel.selectedCallTemplateId == template.id,
+                                onClick = { viewModel.selectedCallTemplateId = template.id }
+                            )
+                            Column(Modifier.padding(start = 4.dp)) {
+                                Text(template.title, fontWeight = FontWeight.Bold)
+                                Text(
+                                    template.question,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                                    fontSize = 12.sp
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "ATTENDEE",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 1.sp,
+                        modifier = Modifier.padding(top = 12.dp, bottom = 6.dp)
+                    )
+                    Box {
+                        OutlinedButton(
+                            onClick = { guestMenuExpanded = true },
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp)
+                        ) {
+                            Text(selectedCallGuest.name, modifier = Modifier.weight(1f))
+                            Icon(Icons.Default.ArrowDropDown, contentDescription = null)
+                        }
+                        DropdownMenu(
+                            expanded = guestMenuExpanded,
+                            onDismissRequest = { guestMenuExpanded = false }
+                        ) {
+                            viewModel.guestsList.forEach { guest ->
+                                DropdownMenuItem(
+                                    text = { Text(guest.name) },
+                                    onClick = {
+                                        viewModel.selectedCallGuestId = guest.id
+                                        guestMenuExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    Button(
+                        onClick = viewModel::initiateAutomatedCall,
+                        enabled = !viewModel.callSending,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = 54.dp)
+                            .padding(top = 12.dp)
+                            .testTag("start_automated_call_button")
+                    ) {
+                        Icon(Icons.Default.PhoneInTalk, contentDescription = null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(if (viewModel.callSending) "Scheduling…" else "Start in-app call")
+                    }
+                    if (viewModel.automatedCalls.isNotEmpty()) {
+                        HorizontalDivider(Modifier.padding(vertical = 14.dp))
+                        Text("RECENT CALLS", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        viewModel.automatedCalls.take(3).forEach { call ->
+                            Text(
+                                "${call.guestName} · ${call.title}: " +
+                                    if (call.answer.isNotBlank()) call.answer else call.status,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                fontSize = 13.sp,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
         item {
             Card(
@@ -2013,6 +2289,7 @@ fun AlertDialogController(
                     is DialogState.ReportIssueConfirmation -> "Report New Issue?"
                     is DialogState.StaffHelpConfirmation -> "Alert Event Staff?"
                     is DialogState.BroadcastConfirmation -> "Send this broadcast?"
+                    is DialogState.AutomatedCallConfirmation -> "Start concierge call?"
                     is DialogState.SwitchRoleConfirmation -> "Switch experience?"
                     is DialogState.MessageDialog -> state.title
                 },
@@ -2027,6 +2304,7 @@ fun AlertDialogController(
                     is DialogState.ReportIssueConfirmation -> "Are you sure you want to raise a ${state.priority} priority request for \"${state.description}\"?"
                     is DialogState.StaffHelpConfirmation -> "Would you like me to request help from the on-site event staff regarding your question: \"${state.query}\"?"
                     is DialogState.BroadcastConfirmation -> "${state.title}\n\n${state.message}\n\nThis will appear in Event Pulse for all connected attendees."
+                    is DialogState.AutomatedCallConfirmation -> "${state.guest.name}\n\n${state.template.question}\n\nThe attendee can answer or decline this AI-assisted in-app call."
                     is DialogState.SwitchRoleConfirmation -> "Leave the current mode and return to attendee or organizer selection?"
                     is DialogState.MessageDialog -> state.message
                 },
@@ -2044,6 +2322,7 @@ fun AlertDialogController(
                         is DialogState.ReportIssueConfirmation -> viewModel.confirmReportIssue(state.description, state.priority)
                         is DialogState.StaffHelpConfirmation -> viewModel.confirmStaffHelp(state.query)
                         is DialogState.BroadcastConfirmation -> viewModel.confirmBroadcast(state.title, state.message)
+                        is DialogState.AutomatedCallConfirmation -> viewModel.confirmAutomatedCall(state.guest, state.template)
                         is DialogState.SwitchRoleConfirmation -> viewModel.confirmRoleSwitch()
                         is DialogState.MessageDialog -> viewModel.closeDialog()
                     }
@@ -2062,6 +2341,7 @@ fun AlertDialogController(
                     when (state) {
                         is DialogState.MessageDialog -> "OK"
                         is DialogState.BroadcastConfirmation -> "Send"
+                        is DialogState.AutomatedCallConfirmation -> "Start call"
                         is DialogState.SwitchRoleConfirmation -> "Switch role"
                         else -> "Confirm"
                     },

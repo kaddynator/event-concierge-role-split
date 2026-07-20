@@ -1,7 +1,9 @@
 package com.example
 
 import com.example.data.Guest
+import com.example.data.AutomatedCall
 import com.example.viewmodel.findSelfCheckInGuest
+import com.example.viewmodel.hasOpenAutomatedCall
 import com.example.viewmodel.validateBroadcast
 import org.junit.Assert.*
 import org.junit.Test
@@ -36,5 +38,16 @@ class ExampleUnitTest {
       validateBroadcast("Title", "a".repeat(281))
     )
     assertNull(validateBroadcast("Dinner", "Dinner is served in the garden."))
+  }
+
+  @Test
+  fun attendeeCannotReceiveDuplicateOpenCall() {
+    val call = AutomatedCall(
+      "c1", "1", "Maya Patel", "food", "Food preference",
+      "Which dinner would you prefer?", listOf("Regular"), "pending"
+    )
+    assertTrue(hasOpenAutomatedCall("1", listOf(call)))
+    assertFalse(hasOpenAutomatedCall("2", listOf(call)))
+    assertFalse(hasOpenAutomatedCall("1", listOf(call.copy(status = "completed"))))
   }
 }

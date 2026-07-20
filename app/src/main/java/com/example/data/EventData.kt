@@ -59,6 +59,26 @@ data class Announcement(
     val time: String
 )
 
+data class CallTemplate(
+    val id: String,
+    val title: String,
+    val question: String,
+    val options: List<String>
+)
+
+data class AutomatedCall(
+    val id: String,
+    val guestId: String,
+    val guestName: String,
+    val templateId: String,
+    val title: String,
+    val question: String,
+    val options: List<String>,
+    val status: String,
+    val answer: String = "",
+    val time: String = ""
+)
+
 data class GuestNote(
     val id: String,
     val guestName: String,
@@ -73,6 +93,8 @@ data class GuestWave(
 )
 
 object InMemoryStore {
+    const val DEMO_ATTENDEE_ID = "1"
+
     val event = EventInfo(
         name = "Aurora Foundation Gala",
         location = "Harbor House, San Francisco",
@@ -128,6 +150,27 @@ object InMemoryStore {
     val announcements = mutableStateListOf(
         Announcement("A1", "Live Auction starting in 15 minutes!", "Prepare your bids for the private Napa Valley wine excursion.", "7:15 PM"),
         Announcement("A2", "Souvenir brochures available", "Don't forget to grab your commemorative gala handbook at the front desk.", "6:05 PM")
+    )
+
+    val callTemplates = listOf(
+        CallTemplate(
+            "food",
+            "Food preference",
+            "Which dinner would you prefer?",
+            listOf("Regular", "Vegetarian", "Vegan", "Gluten-free")
+        ),
+        CallTemplate(
+            "rsvp",
+            "RSVP confirmation",
+            "Are you still planning to attend the Aurora Foundation Gala?",
+            listOf("Attending", "Not attending", "Not sure")
+        ),
+        CallTemplate(
+            "arrival",
+            "Arrival status",
+            "What is your current arrival status?",
+            listOf("Already here", "Under 15 minutes", "15–30 minutes", "Running late")
+        )
     )
 
     val guestNotes = mutableStateListOf<GuestNote>()

@@ -155,6 +155,8 @@ Or build from the terminal:
 
 - Separate attendee and organizer interfaces with a visible, confirmed role switch
 - Organizer broadcasts delivered live to attendee Event Pulse through Firestore
+- Automated in-app concierge calls for food preference, RSVP, and arrival status
+- Attendee answer/decline controls, Gemini Live voice prompts, and structured Firestore results
 - Gemini-powered typed concierge answers
 - Gemini Live voice session with microphone input and audio output
 - Anonymous Firebase sessions
@@ -180,7 +182,7 @@ Before a public production launch:
 6. use direct Google Workspace APIs only if background synchronization becomes
    more valuable than the current user-confirmed handoffs;
 7. add trusted-server FCM delivery if broadcasts must notify attendees while the
-   app is closed.
+   app is closed or automated calls must ring in the background.
 
 ## The next lovely version
 

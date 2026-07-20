@@ -16,6 +16,7 @@ sealed class DialogState {
     data class ReportIssueConfirmation(val description: String, val priority: String) : DialogState()
     data class StaffHelpConfirmation(val query: String) : DialogState()
     data class BroadcastConfirmation(val title: String, val message: String) : DialogState()
+    data class AutomatedCallConfirmation(val guest: Guest, val template: CallTemplate) : DialogState()
     data object SwitchRoleConfirmation : DialogState()
     data class MessageDialog(val title: String, val message: String) : DialogState()
 }
@@ -41,12 +42,17 @@ fun validateBroadcast(title: String, message: String): String? = when {
     else -> null
 }
 
+fun hasOpenAutomatedCall(guestId: String, calls: List<AutomatedCall>): Boolean =
+    calls.any { it.guestId == guestId && it.status in setOf("pending", "active") }
+
 class EventViewModel : ViewModel() {
     var cloudStatus by mutableStateOf("Connecting")
     val announcementsList = mutableStateListOf<Announcement>().apply {
         addAll(InMemoryStore.announcements)
     }
+    val automatedCalls = mutableStateListOf<AutomatedCall>()
     private var stopBroadcastListener: (() -> Unit)? = null
+    private var stopAutomatedCallListener: (() -> Unit)? = null
 
     init {
         CloudServices.connect { result ->
@@ -58,6 +64,13 @@ class EventViewModel : ViewModel() {
                             announcementsList.clear()
                             announcementsList.addAll(broadcasts)
                         }
+                    },
+                    onError = { }
+                )
+                stopAutomatedCallListener = CloudServices.observeAutomatedCalls(
+                    onUpdate = {
+                        automatedCalls.clear()
+                        automatedCalls.addAll(it)
                     },
                     onError = { }
                 )
@@ -127,6 +140,17 @@ class EventViewModel : ViewModel() {
     var broadcastTitle by mutableStateOf("")
     var broadcastMessage by mutableStateOf("")
     var broadcastSending by mutableStateOf(false)
+    var selectedCallTemplateId by mutableStateOf(InMemoryStore.callTemplates.first().id)
+    var selectedCallGuestId by mutableStateOf(InMemoryStore.DEMO_ATTENDEE_ID)
+    var callSending by mutableStateOf(false)
+    var activeAutomatedCall by mutableStateOf<AutomatedCall?>(null)
+        private set
+    var guidedCallVoiceState by mutableStateOf("idle")
+        private set
+    val incomingAutomatedCall: AutomatedCall?
+        get() = automatedCalls.firstOrNull {
+            it.guestId == InMemoryStore.DEMO_ATTENDEE_ID && it.status == "pending"
+        }
 
     fun onConciergeQueryChanged(newQuery: String) {
         conciergeQuery = newQuery
@@ -252,6 +276,102 @@ class EventViewModel : ViewModel() {
         }
     }
 
+    fun initiateAutomatedCall() {
+        val guest = guestsList.firstOrNull { it.id == selectedCallGuestId }
+        val template = InMemoryStore.callTemplates.firstOrNull { it.id == selectedCallTemplateId }
+        if (guest == null || template == null) return
+        if (hasOpenAutomatedCall(guest.id, automatedCalls)) {
+            activeDialog = DialogState.MessageDialog(
+                "Call already waiting",
+                "${guest.name} already has an unanswered concierge call."
+            )
+            return
+        }
+        activeDialog = DialogState.AutomatedCallConfirmation(guest, template)
+    }
+
+    fun confirmAutomatedCall(guest: Guest, template: CallTemplate) {
+        callSending = true
+        CloudServices.createAutomatedCall(guest, template) { result ->
+            callSending = false
+            activeDialog = if (result.isSuccess) {
+                DialogState.MessageDialog(
+                    "Call scheduled",
+                    "${guest.name} will receive an in-app ${template.title.lowercase()} call."
+                )
+            } else {
+                DialogState.MessageDialog(
+                    "Call failed",
+                    result.exceptionOrNull()?.message ?: "Check the connection and try again."
+                )
+            }
+        }
+    }
+
+    fun answerAutomatedCall(call: AutomatedCall) {
+        activeAutomatedCall = call
+        CloudServices.updateAutomatedCall(call.id, "active")
+    }
+
+    fun declineAutomatedCall(call: AutomatedCall) {
+        CloudServices.updateAutomatedCall(call.id, "declined")
+    }
+
+    fun startGuidedCallVoice() {
+        val call = activeAutomatedCall ?: return
+        if (guidedCallVoiceState == "connecting" || guidedCallVoiceState == "listening") return
+        guidedCallVoiceState = "connecting"
+        viewModelScope.launch {
+            runCatching { CloudServices.startGuidedVoice(call.question) }
+                .onSuccess { guidedCallVoiceState = "listening" }
+                .onFailure {
+                    guidedCallVoiceState = "unavailable"
+                    activeDialog = DialogState.MessageDialog(
+                        "Voice unavailable",
+                        "You can still answer using one of the choices."
+                    )
+                }
+        }
+    }
+
+    fun submitAutomatedCallAnswer(answer: String) {
+        val call = activeAutomatedCall ?: return
+        if (answer !in call.options) return
+        guidedCallVoiceState = "saving"
+        viewModelScope.launch {
+            runCatching { CloudServices.stopVoice() }
+            CloudServices.updateAutomatedCall(call.id, "completed", answer) { result ->
+                if (result.isSuccess) {
+                    activeAutomatedCall = null
+                    guidedCallVoiceState = "idle"
+                    activeDialog = DialogState.MessageDialog(
+                        "Response shared",
+                        "Your ${call.title.lowercase()} response was sent to the organizer."
+                    )
+                } else {
+                    guidedCallVoiceState = "unavailable"
+                    activeDialog = DialogState.MessageDialog(
+                        "Response not saved",
+                        "Check the connection and try again."
+                    )
+                }
+            }
+        }
+    }
+
+    fun endAutomatedCall() {
+        val call = activeAutomatedCall ?: return
+        activeAutomatedCall = null
+        guidedCallVoiceState = "idle"
+        CloudServices.updateAutomatedCall(call.id, "declined")
+        viewModelScope.launch { runCatching { CloudServices.stopVoice() } }
+    }
+
+    fun stopGuidedCallVoice() {
+        guidedCallVoiceState = "idle"
+        viewModelScope.launch { runCatching { CloudServices.stopVoice() } }
+    }
+
     fun confirmStaffHelp(query: String) {
         // Create an issue automatically
         val newIssue = OpenIssue(
@@ -375,6 +495,7 @@ class EventViewModel : ViewModel() {
 
     override fun onCleared() {
         stopBroadcastListener?.invoke()
+        stopAutomatedCallListener?.invoke()
         super.onCleared()
     }
 }
